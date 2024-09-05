@@ -306,7 +306,7 @@ int main(int argc, char **argv) try
     cout <<"CACU"<< d2.CriticalDt()<<endl;
 
     d2.Alpha = R; //Verlet distance
-    d2.Solve(/*tf*/Tf2, dtdem, /*dtOut*/dtOut2, Setup, Report, "shakecpu", 2, Nproc);
+    d2.Solve(/*tf*/Tf2, dtdem, /*dtOut*/dtOut2, Setup, Report, "sandpile", 2, Nproc);
     d2.Save("Stage_cpu");
 
 }
