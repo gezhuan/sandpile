@@ -1,0 +1,35 @@
+sphere    = ptype      Particle type
+1         = Render     Produce visualization files?
+7.0       = L_x        x length plate         
+7.0       = L_y        y dimension length of lbm grid 
+10.0       = L_z        z dimension length of lbm grid     
+0.01      = nu         viscosity of the fluid    
+0.05      = dx         grid size    
+5e-5      = dt         time step    
+-981.0    = Dp         fluid acceleration    
+0.15       = R          particle size  
+1.0       = Tf1        final time of packing stage 
+20.0      = Tf2      final time of submerged process
+0.05      = dtOut1     Packing write data
+0.01      = dtOut2     Dry     write data
+10.0      = height     height of the column
+1.167       = rho_s      particle density 
+0.0       = rho_l      fluid density to calculate the buoyancy of particles
+0.4676      = Mu         
+0.2       = Muw      
+0.1       = Beta       
+2.0e6     = Kn              
+-0.8      = Gn      
+0.2      = ratiots    
+0.3       = ratiokn    
+0.1       = R_random
+-0.8      = Gnw
+1.0       = sizedis     LBM write data
+0.28      = MUP
+90        = Ang
+1.0       = fraction
+6          = Nump
+7.0       = Amp   
+2.0    = N times settle
+
+
