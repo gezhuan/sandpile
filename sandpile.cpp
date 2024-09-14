@@ -90,6 +90,7 @@ void Setup (DEM::Domain & d2, void * UD)
         cout <<"Tp"<<tp<<endl;
         cout <<"fmod(d2.iter,  Nstep)"<<fmod(d2.iter,  Nstep)<<endl;
         
+    //std::cout << d2.Interactons.Size() << std::endl;
         d2.AddSphere(-1,Vec3_t(0.0,0.0,dat.height),dat.R,dat.rho_s);
         d2.Particles[d2.Particles.Size()-1]->Props.Kn = dat.Kn; // normal stiffness
         d2.Particles[d2.Particles.Size()-1]->Props.Kt = dat.Kt; // trangential stiffness
@@ -99,13 +100,15 @@ void Setup (DEM::Domain & d2, void * UD)
         d2.Particles[d2.Particles.Size()-1]->v = Vec3_t(0.0,0.0,0.0);
         d2.Particles[d2.Particles.Size()-1]->InitializeVelocity(d2.Dt);
         cout <<"Add V"<<d2.Particles[d2.Particles.Size()-1]->v<<endl;
+        d2.FreePar.Push(d2.Particles.Size()-1);
+        d2.UpdateContacts();
+    //std::cout << d2.Interactons.Size() << std::endl;
     }
-    #pragma omp parallel for schedule(static) num_threads(d2.Nproc)
-    for (size_t np=0;np<d2.Particles.Size();np++)
-    {
-        d2.Particles[np]->InitializeVelocity(d2.Dt);
-    }
-    d2.UpdateContacts();
+    //#pragma omp parallel for schedule(static) num_threads(d2.Nproc)
+    //for (size_t np=0;np<d2.Particles.Size();np++)
+    //{
+        //d2.Particles[np]->InitializeVelocity(d2.Dt);
+    //}
     //cout <<"v"<< vmod<<endl;
  
 }
