@@ -272,7 +272,7 @@ int main(int argc, char **argv) try
     double dtOut2    ;
     double height    ;
     double rho_s     ;
-    double w_th       ;
+    double w_th      ;
     double Muw       ;
     double Beta      ;        //
 	double Kn        ;         // Normal stiffness
@@ -291,6 +291,7 @@ int main(int argc, char **argv) try
     int    Nump      ;
     double tp        ;
     int    Anumper   ;
+    String contactlaw;
 
 
     
@@ -327,6 +328,8 @@ int main(int argc, char **argv) try
         infile >> Nump;            infile.ignore(200,'\n');
         infile >> tp;              infile.ignore(200,'\n');
         infile >> Anumper;         infile.ignore(200,'\n');
+        infile >> contactlaw;   infile.ignore(200,'\n');
+
         
 
     }
@@ -351,10 +354,13 @@ int main(int argc, char **argv) try
     double thichness=0.1;
     
 
-
-    DEM::Domain d2;
-    
+    size_t cl = 0;
+    if (contactlaw=="hertz") cl=1;
+    cout <<"contactlaw"<< contactlaw <<endl;
     UserData dat;
+    DEM::Domain d2(&dat,cl);
+
+
     d2.UserData = &dat;
     dat.R=R;
     dat.rho_s=rho_s;

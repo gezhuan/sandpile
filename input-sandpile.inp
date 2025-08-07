@@ -1,4 +1,4 @@
-cube      = ptype      Particle type    cube  tetra sphere
+vari    = ptype      Particle type    cube  tetra sphere
 1         = Render     Produce visualization files?
 20.0      = L_x        x length plate         
 20.0      = L_y        y dimension length of lbm grid 
@@ -7,8 +7,8 @@ cube      = ptype      Particle type    cube  tetra sphere
 0.05      = dx         grid size    
 5e-5      = dt         time step    
 -981.0    = Dp         fluid acceleration    
-0.3       = R          particle size     R_base 9.2
-200       = Tf2      final time of submerged process
+0.15      = R          particle size     R_base 9.2
+400       = Tf2      final time of submerged process
 0.1       = dtOut2     Dry     write data
 8.0       = height     height of the column
 1.167     = rho_s      particle density 
@@ -30,5 +30,6 @@ cube      = ptype      Particle type    cube  tetra sphere
 30000     = Nump
 1.0       = N times settle
 4         = Anumper   1 4 12
+hook   = contactlaw
 
 
