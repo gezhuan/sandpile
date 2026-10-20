@@ -1,48 +1,64 @@
 /************************************************************************
  * MechSys - Open Library for Mechanical Systems                        *
- * Copyright (C) 2009 Sergio Galindo                                    *
- * Copyright (C) 2013 William Oquendo                                   *
- *                                                                      *
- * This program is free software: you can redistribute it and/or modify *
- * it under the terms of the GNU General Public License as published by *
- * the Free Software Foundation, either version 3 of the License, or    *
- * any later version.                                                   *
- *                                                                      *
- * This program is distributed in the hope that it will be useful,      *
- * but WITHOUT ANY WARRANTY; without even the implied warranty of       *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the         *
- * GNU General Public License for more details.                         *
- *                                                                      *
- * You should have received a copy of the GNU General Public License    *
- * along with this program. If not, see <ttp://www.gnu.org/licenses/>  *
  ************************************************************************/
 
-// MechSys
 #include <mechsys/dem/domain.h>
 #include <mechsys/util/fatal.h>
 #include <mechsys/util/util.h>
-#include <mechsys/mesh/unstructured.h>
 #include <mechsys/linalg/matvec.h>
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <fstream>
 #include <iostream>
 #include <random>
 #include <vector>
-#include <cmath>
-#include <chrono>
-#include <algorithm>
 
 using std::cout;
 using std::endl;
 
+struct HighOutputConfig
+{
+    bool enabled;
+    double t1;
+    double t2;
+    double dt;
+
+    HighOutputConfig() : enabled(false), t1(0.0), t2(0.0), dt(0.0) {}
+};
+
+struct InputData
+{
+    String ptype;
+    bool Render;
+    double L_x, L_y, L_z;
+    double dt, Dp, R;
+    double Tf1, dtOut1, Tf2, dtOut2;
+    double height, height2;
+    double R_base, rho_s, w_th, Muw;
+    double Kn, Kt, Gn, Gnb;
+    double Rp_base, Gnw, sizedis, MUP;
+    double Ang, fraction, R_source;
+    int Nump;
+    double tp;
+    int Anumper;
+    String contactlaw;
+    bool stage_packing, stage_avalanche;
+    double scaleR;
+
+    HighOutputConfig hfPacking;
+    HighOutputConfig hfAvalanche;
+};
+
 struct UserData
 {
-
-    
     double height;
     double R;
     double rho_s;
     double acc;
     double tp;
-    int    ADDS=0;
+    int ADDS;
     double Kn;
     double Kt;
     double Gn;
@@ -50,415 +66,392 @@ struct UserData
     double timeperadd;
     double R_source;
     double w_th;
+    double scaleR;
     String ptype;
     int Nump;
     int Anumper;
-    std::ofstream      oss_ss;       ///< file for stress strain data
+    size_t injectEverySteps;
+
+    UserData()
+        : height(0.0), R(0.0), rho_s(0.0), acc(0.0), tp(0.0), ADDS(0),
+          Kn(0.0), Kt(0.0), Gn(0.0), MUP(0.0), timeperadd(0.0),
+          R_source(0.0), w_th(0.0), scaleR(1.0), Nump(0), Anumper(1),
+          injectEverySteps(1) {}
 };
 
-struct Circle {
-    double x;
-    double y;
-    double r;
+struct Circle
+{
+    double x, y, r;
 };
 
-// 检查两个圆是否重叠
-bool circlesOverlap(const Circle& c1, const Circle& c2) {
-    double dx = c1.x - c2.x;
-    double dy = c1.y - c2.y;
-    double distance = std::sqrt(dx*dx + dy*dy);
-    return distance < (c1.r + c2.r);
+static void ReadValue(std::ifstream &in, String &v) { in >> v; in.ignore(200,'\n'); }
+static void ReadValue(std::ifstream &in, bool   &v) { in >> v; in.ignore(200,'\n'); }
+static void ReadValue(std::ifstream &in, int    &v) { in >> v; in.ignore(200,'\n'); }
+static void ReadValue(std::ifstream &in, double &v) { in >> v; in.ignore(200,'\n'); }
+
+static InputData ReadInput(const String &filename)
+{
+    if (!Util::FileExists(filename)) throw new Fatal("File <%s> not found",filename.CStr());
+
+    std::ifstream in(filename.CStr());
+    InputData p;
+
+    ReadValue(in,p.ptype);
+    ReadValue(in,p.Render);
+    ReadValue(in,p.L_x);
+    ReadValue(in,p.L_y);
+    ReadValue(in,p.L_z);
+    ReadValue(in,p.dt);
+    ReadValue(in,p.Dp);
+    ReadValue(in,p.R);
+    ReadValue(in,p.Tf1);
+    ReadValue(in,p.dtOut1);
+    ReadValue(in,p.Tf2);
+    ReadValue(in,p.dtOut2);
+    ReadValue(in,p.height);
+    ReadValue(in,p.height2);
+    ReadValue(in,p.R_base);
+    ReadValue(in,p.rho_s);
+    ReadValue(in,p.w_th);
+    ReadValue(in,p.Muw);
+    ReadValue(in,p.Kn);
+    ReadValue(in,p.Kt);
+    ReadValue(in,p.Gn);
+    ReadValue(in,p.Gnb);
+    ReadValue(in,p.Rp_base);
+    ReadValue(in,p.Gnw);
+    ReadValue(in,p.sizedis);
+    ReadValue(in,p.MUP);
+    ReadValue(in,p.Ang);
+    ReadValue(in,p.fraction);
+    ReadValue(in,p.R_source);
+    ReadValue(in,p.Nump);
+    ReadValue(in,p.tp);
+    ReadValue(in,p.Anumper);
+    ReadValue(in,p.contactlaw);
+    ReadValue(in,p.stage_packing);
+    ReadValue(in,p.stage_avalanche);
+    ReadValue(in,p.scaleR);
+    ReadValue(in,p.hfPacking.enabled);
+    ReadValue(in,p.hfPacking.t1);
+    ReadValue(in,p.hfPacking.t2);
+    ReadValue(in,p.hfPacking.dt);
+    ReadValue(in,p.hfAvalanche.enabled);
+    ReadValue(in,p.hfAvalanche.t1);
+    ReadValue(in,p.hfAvalanche.t2);
+    ReadValue(in,p.hfAvalanche.dt);
+
+    return p;
 }
 
-// 检查圆是否在大圆内
-bool isInsideBigCircle(const Circle& small, const Circle& big) {
-    double dx = small.x - big.x;
-    double dy = small.y - big.y;
-    double distance = std::sqrt(dx*dx + dy*dy);
-    return distance <= (big.r - small.r);
+static bool CirclesOverlap(const Circle &a, const Circle &b)
+{
+    const double dx = a.x-b.x;
+    const double dy = a.y-b.y;
+    const double rr = a.r+b.r;
+    return dx*dx + dy*dy < rr*rr;
 }
 
-// 生成N个不重叠的小圆
-std::vector<Circle> generateNonOverlappingCircles(
-    double bigR, double bigX, double bigY, double smallR, 
-    int N, int maxAttemptsPerCircle = 1000, int maxTotalAttempts = 10000) {
-    
-    // 准备随机数生成器
-    unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
+static std::vector<Circle> GenerateCircles(double bigR, double smallR, int N,
+                                            int maxAttemptsPerCircle=1000,
+                                            int maxTotalAttempts=10000)
+{
+    const unsigned seed = static_cast<unsigned>(
+        std::chrono::system_clock::now().time_since_epoch().count());
     std::default_random_engine generator(seed);
-    std::uniform_real_distribution<double> angleDist(0.0, 2 * M_PI);
-    std::uniform_real_distribution<double> radiusDist(0.0, 1.0);
-    
-    Circle bigCircle = {bigX, bigY, bigR};
-    std::vector<Circle> smallCircles;
+    std::uniform_real_distribution<double> angleDist(0.0,2.0*M_PI);
+    std::uniform_real_distribution<double> radiusDist(0.0,1.0);
+
+    std::vector<Circle> circles;
+    circles.reserve(N);
     int totalAttempts = 0;
-    
-    for (int i = 0; i < N && totalAttempts < maxTotalAttempts; ) {
-        int attempts = 0;
+
+    for (int i=0; i<N && totalAttempts<maxTotalAttempts; ++i)
+    {
         bool placed = false;
-        
-        while (!placed && attempts < maxAttemptsPerCircle && totalAttempts < maxTotalAttempts) {
-            // 生成随机角度和半径（使用平方根确保均匀分布）
-            double angle = angleDist(generator);
-            double radius = std::sqrt(radiusDist(generator)) * (bigR - smallR);
-            
-            // 计算坐标
-            Circle newCircle = {
-                bigX + radius * std::cos(angle),
-                bigY + radius * std::sin(angle),
-                smallR
-            };
-            
-            // 检查是否在大圆内且不与任何已有小圆重叠
-            bool valid = isInsideBigCircle(newCircle, bigCircle);
-            for (const auto& circle : smallCircles) {
-                if (circlesOverlap(newCircle, circle)) {
+        for (int attempt=0; attempt<maxAttemptsPerCircle && totalAttempts<maxTotalAttempts;
+             ++attempt, ++totalAttempts)
+        {
+            const double angle  = angleDist(generator);
+            const double radius = std::sqrt(radiusDist(generator))*(bigR-smallR);
+            Circle candidate = {radius*std::cos(angle), radius*std::sin(angle), smallR};
+
+            bool valid = true;
+            for (size_t j=0; j<circles.size(); ++j)
+            {
+                if (CirclesOverlap(candidate,circles[j]))
+                {
                     valid = false;
                     break;
                 }
             }
-            
-            if (valid) {
-                smallCircles.push_back(newCircle);
+
+            if (valid)
+            {
+                circles.push_back(candidate);
                 placed = true;
-                i++;  // 只有成功放置才增加i
+                break;
             }
-            
-            attempts++;
-            totalAttempts++;
         }
-        
-        if (!placed) {
-            std::cerr << "警告: 无法放置第 " << i+1 << " 个小圆，已尝试 " 
-                      << attempts << " 次\n";
-            break;  // 如果无法放置当前小圆，直接退出
+
+        if (!placed)
+        {
+            std::cerr << "Warning: only placed " << circles.size()
+                      << " of " << N << " requested particles\n";
+            break;
         }
     }
-    
-    if (smallCircles.size() < N) {
-        std::cerr << "警告: 仅成功放置 " << smallCircles.size() 
-                  << " 个中的 " << N << " 个小圆\n";
-    }
-    
-    return smallCircles;
+
+    return circles;
 }
 
-
-void Setup (DEM::Domain & d2, void * UD)
+static void InitUserData(UserData &dat, const InputData &p, double height)
 {
-    UserData & dat = (*static_cast<UserData *>(UD));
-    double tp=pow(2.0*2.0*dat.R/abs(dat.acc), 0.5);
-    double Nstep=ceil(tp*dat.tp/d2.Dt);
-    dat.timeperadd=tp;
-    Vec3_t axis0(OrthoSys::e0); // rotation of face
+    dat.height   = height;
+    dat.R        = p.R;
+    dat.rho_s    = p.rho_s;
+    dat.acc      = p.Dp;
+    dat.tp       = p.tp;
+    dat.Kn       = p.Kn;
+    dat.Kt       = p.Kt;
+    dat.Gn       = p.Gn;
+    dat.MUP      = p.MUP;
+    dat.R_source = p.R_source;
+    dat.w_th     = p.w_th;
+    dat.scaleR   = p.scaleR;
+    dat.ptype    = p.ptype;
+    dat.Nump     = p.Nump;
+    dat.Anumper  = p.Anumper;
 
-    //cout <<"datacc"<<dat.acc<<endl;
-    //cout <<"datR"<<dat.R<<endl;
-    //cout <<"Nstep"<<Nstep<<endl;
-    //cout <<"Tp"<<tp<<endl;
-    //Nstep=15;
-    if ( fmod(d2.iter,  Nstep)-0.0 ==0.0&&dat.ADDS< dat.Nump)
-    {
-        
-        //cout <<"Add Sphere"<<dat.ADDS<<endl;
-        //cout <<"Nstep"<<Nstep<<endl;
-        //cout <<"dat.Gn"<<dat.Gn<<endl;
-        //cout <<"Tp"<<tp<<endl;
-        //cout <<"fmod(d2.iter,  Nstep)"<<fmod(d2.iter,  Nstep)<<endl;
+    if (p.dt<=0.0) throw new Fatal("dt must be positive");
+    if (std::abs(dat.acc)<=0.0) throw new Fatal("Dp/acc must be non-zero");
 
-
-        double bigR = dat.R_source*dat.R;    // 大圆半径
-        double bigX = 0.0;     // 大圆中心x坐标
-        double bigY = 0.0;     // 大圆中心y坐标
-        double smallR = dat.R;   // 小圆半径
- 
-        
-        auto circles = generateNonOverlappingCircles(bigR, bigX, bigY, smallR, dat.Anumper);
-        for (size_t np=0;np<circles.size();np++)
-        {
-            dat.ADDS=dat.ADDS+1;
-            //d2.AddSphere(-1,Vec3_t(circles[np].x,circles[np].y,dat.height),dat.R,dat.rho_s);
-            if (dat.ptype=="sphere") d2.AddSphere (-1,Vec3_t(circles[np].x,circles[np].y,dat.height),dat.R,dat.rho_s);
-            if (dat.ptype=="cube")   d2.AddCube   (-1, Vec3_t(circles[np].x,circles[np].y,dat.height),dat.w_th,0.5*dat.R,dat.rho_s);
-            if (dat.ptype=="tetra")  d2.AddTetra  (-1, Vec3_t(circles[np].x,circles[np].y,dat.height),dat.w_th,0.5*dat.R,dat.rho_s);
-            if (dat.ptype=="rice")  d2.AddRice   (-1, Vec3_t(circles[np].x,circles[np].y,dat.height), dat.w_th, dat.R*2.0, dat.rho_s, M_PI/2.0, &axis0);
-        }
-        
-
-        for (size_t np=0;np<dat.Anumper;np++)
-        {
-            d2.Particles[d2.Particles.Size()-np-1]->Props.Kn = dat.Kn; // normal stiffness
-            d2.Particles[d2.Particles.Size()-np-1]->Props.Kt = dat.Kt; // trangential stiffness
-            d2.Particles[d2.Particles.Size()-np-1]->Props.Gn = dat.Gn; // restitution coefficient
-            d2.Particles[d2.Particles.Size()-np-1]->Props.Mu = dat.MUP; // frictional coefficient
-            d2.Particles[d2.Particles.Size()-np-1]->Ff = d2.Particles[d2.Particles.Size()-np-1]->Props.m*Vec3_t(0.0,0.0,dat.acc);
-            d2.Particles[d2.Particles.Size()-np-1]->v = Vec3_t(0.0,0.0,0.0);
-            d2.Particles[d2.Particles.Size()-np-1]->InitializeVelocity(d2.Dt);
-            //cout <<"Add V"<<d2.Particles[d2.Particles.Size()-1]->v<<endl;
-            d2.FreePar.Push(d2.Particles.Size()-np-1);
-        }
-
-        
-        d2.UpdateContacts();
-    //std::cout << d2.Interactons.Size() << std::endl;
-    }
-
-    
-    /*#pragma omp parallel for schedule(static) num_threads(d2.Nproc)
-    for (size_t np=0;np<d2.Particles.Size();np++)
-    {
-        if (d2.Particles[np]->Tag == -1&& d2.Particles[np]->x(2)-Center(2)<=3.0*dat.R)
-        {
-            //countdel = countdel+1;
-            DelParticlesIdx(np);
-            //d2.Particles[np]->Tag = 10;
-        }
-    }*/
-    //cout <<"v"<< vmod<<endl;
- 
+    dat.timeperadd = std::sqrt(4.0*dat.R/std::abs(dat.acc));
+    dat.injectEverySteps = static_cast<size_t>(
+        std::ceil(dat.timeperadd*dat.tp/p.dt));
+    if (dat.injectEverySteps<1) dat.injectEverySteps=1;
 }
 
-void Report (DEM::Domain & d2, void *UD)
+static void SetParticleMaterial(DEM::Particle *p, double Kn, double Kt,
+                                double Gn, double Mu)
 {
-    UserData & dat = (*static_cast<UserData *>(UD));
-    if (d2.idx_out==0)
+    p->Props.Kn = Kn;
+    p->Props.Kt = Kt;
+    p->Props.Gn = Gn;
+    p->Props.Mu = Mu;
+}
+
+static void ConfigureParticles(DEM::Domain &d, const InputData &p)
+{
+    for (size_t i=0; i<d.Particles.Size(); ++i)
     {
-        String fs;
-        fs.Printf("%s_walls.res",d2.FileKey.CStr());
-        dat.oss_ss.open(fs.CStr());
-        dat.oss_ss << Util::_10_6 << "Time"<< Util::_8s << "AddN" << Util::_8s << "Tf" << Util::_8s << "Nc" << Util::_8s << "Nsc \n";
-    }
-    if (!d2.Finished) 
-    {
-        size_t Nc = 0;
-        size_t Nsc = 0;
-        for (size_t i=0; i<d2.CInteractons.Size(); i++)
+        DEM::Particle *par = d.Particles[i];
+
+        if (par->Tag==-1)
         {
-            Nc += d2.CInteractons[i]->Nc;    //Number of contact
-            Nsc += d2.CInteractons[i]->Nsc;  // Number of sliding contact
+            par->Ff = par->Props.m*Vec3_t(0.0,0.0,p.Dp);
+            SetParticleMaterial(par,p.Kn,p.Kt,p.Gn,p.MUP);
         }
-        dat.oss_ss << Util::_10_6 << d2.Time << Util::_8s << dat.ADDS << Util::_8s << dat.timeperadd<< Util::_8s << Nc << Util::_8s << Nsc << std::endl;
+        else if (par->Tag==-15)
+        {
+            par->v = Vec3_t(0.0,0.0,0.0);
+            par->FixVeloc();
+            SetParticleMaterial(par,p.Kn,p.Kt,p.Gnb,p.Muw);
+        }
+        else if (par->Tag<-15)
+        {
+            par->v = Vec3_t(0.0,0.0,0.0);
+            SetParticleMaterial(par,p.Kn,p.Kt,p.Gnw,p.Muw);
+        }
     }
-    else
+}
+
+static void FixContainerPlanes(DEM::Domain &d)
+{
+    for (int tag=-16; tag>=-20; --tag) d.GetParticle(tag)->FixVeloc();
+}
+
+static void ConfigureHighOutput(DEM::Domain &d, const HighOutputConfig &hf,
+                                const char *stageName)
+{
+    if (!hf.enabled) return;
+    if (hf.t1<0.0 || hf.t2<hf.t1 || hf.dt<=0.0)
+        throw new Fatal("Invalid %s high-frequency output window",stageName);
+
+    // High-Frequency Standard Output V0.1:
+    // reuse the DEM standard particle/contact writers inside Solve.
+    d.SetHighFrequencyOutput(hf.t1,hf.t2,hf.dt);
+    d.SetHighStandardOutput(true,true); // particles, contacts
+
+    cout << stageName << " high-frequency standard output: ["
+         << hf.t1 << ", " << hf.t2 << "] every " << hf.dt
+         << " (particles + contacts)" << endl;
+}
+
+static void AddInjectedParticle(DEM::Domain &d, UserData &dat,
+                                const Circle &c, Vec3_t &axis0)
+{
+    const Vec3_t pos(c.x,c.y,dat.height);
+
+    if      (dat.ptype=="sphere") d.AddSphere(-1,pos,dat.R,dat.rho_s);
+    else if (dat.ptype=="cube")   d.AddCube  (-1,pos,dat.w_th,dat.scaleR*dat.R,dat.rho_s);
+    else if (dat.ptype=="tetra")  d.AddTetra (-1,pos,dat.w_th,dat.scaleR*dat.R,dat.rho_s);
+    else if (dat.ptype=="rice")   d.AddRice  (-1,pos,dat.w_th,dat.scaleR*dat.R,dat.rho_s,M_PI/2.0,&axis0);
+    else throw new Fatal("Unknown particle type <%s>",dat.ptype.CStr());
+
+    const size_t idx = d.Particles.Size()-1;
+    DEM::Particle *p = d.Particles[idx];
+    SetParticleMaterial(p,dat.Kn,dat.Kt,dat.Gn,dat.MUP);
+    p->Ff = p->Props.m*Vec3_t(0.0,0.0,dat.acc);
+    p->v  = Vec3_t(0.0,0.0,0.0);
+    p->InitializeVelocity(d.Dt);
+    d.FreePar.Push(idx);
+}
+
+static void SetupInjection(DEM::Domain &d, void *UD)
+{
+    UserData &dat = *static_cast<UserData *>(UD);
+    if (dat.ADDS>=dat.Nump || d.iter%dat.injectEverySteps!=0) return;
+
+    const int requestN = std::min(dat.Anumper,dat.Nump-dat.ADDS);
+    if (requestN<=0) return;
+
+    std::vector<Circle> circles = GenerateCircles(dat.R_source*dat.R,dat.R,requestN);
+    Vec3_t axis0(OrthoSys::e0);
+
+    for (size_t i=0; i<circles.size(); ++i)
     {
-        dat.oss_ss.close();
+        AddInjectedParticle(d,dat,circles[i],axis0);
+        ++dat.ADDS;
     }
+
+    if (!circles.empty()) d.UpdateContacts();
+}
+
+static size_t ContactLaw(const String &name)
+{
+    return name=="hertz" ? 1 : 0;
+}
+
+static void AddInitialParticle(DEM::Domain &d, const InputData &p,
+                               double height, Vec3_t &axis0)
+{
+    const Vec3_t pos(0.0,0.0,height-16.0*p.R);
+    if      (p.ptype=="sphere") d.AddSphere(-1,pos,p.R,p.rho_s);
+    else if (p.ptype=="cube")   d.AddCube  (-1,pos,p.w_th,p.scaleR*p.R,p.rho_s);
+    else if (p.ptype=="tetra")  d.AddTetra (-1,pos,p.w_th,p.scaleR*p.R,p.rho_s);
+    else if (p.ptype=="rice")   d.AddRice  (-1,pos,p.w_th,p.scaleR*p.R,p.rho_s,M_PI/2.0,&axis0);
+    else throw new Fatal("Unknown particle type <%s>",p.ptype.CStr());
+}
+
+static void BuildPackingGeometry(DEM::Domain &d, const InputData &p)
+{
+    const Vec3_t center(0.0,0.0,0.0);
+    Vec3_t axis0(OrthoSys::e0);
+    Vec3_t axis1(OrthoSys::e1);
+
+    AddInitialParticle(d,p,p.height,axis0);
+
+    const Vec3_t xmin(center(0)-1.2*p.R_base,center(1)-1.2*p.R_base,center(2));
+    const Vec3_t xmax(center(0)+1.2*p.R_base,center(1)+1.2*p.R_base,center(2)+2.0*p.Rp_base);
+    d.GenSpheresBox(-15,xmin,xmax,p.Rp_base,p.rho_s,"HCP",1234,1.0,p.sizedis);
+
+    const double scaleL = 2.0;
+    const double angle  = p.Ang*M_PI/180.0;
+    d.AddPlane(-16,Vec3_t(0.0,0.0,-p.L_z),p.w_th,scaleL*p.R_base*2.0,scaleL*p.R_base*2.0,1.0,0.0,&axis1);
+    d.AddPlane(-17,Vec3_t(-p.R_base*scaleL,0.0,0.0),p.w_th,2.0*p.L_z+p.height,scaleL*p.R_base*2.0,1.0,angle,&axis1);
+    d.AddPlane(-18,Vec3_t( p.R_base*scaleL,0.0,0.0),p.w_th,2.0*p.L_z+p.height,scaleL*p.R_base*2.0,1.0,angle,&axis1);
+    d.AddPlane(-19,Vec3_t(0.0,-p.R_base*scaleL,0.0),p.w_th,scaleL*p.R_base*2.0,2.0*p.L_z+p.height,1.0,M_PI/2.0,&axis0);
+    d.AddPlane(-20,Vec3_t(0.0, p.R_base*scaleL,0.0),p.w_th,scaleL*p.R_base*2.0,2.0*p.L_z+p.height,1.0,M_PI/2.0,&axis0);
+    FixContainerPlanes(d);
+
+    for (size_t i=0; i<d.Particles.Size(); ++i)
+    {
+        DEM::Particle *par = d.Particles[i];
+        if (par->Tag!=-15) continue;
+
+        const double dx=par->x(0), dy=par->x(1), dz=par->x(2);
+        if (dx*dx+dy*dy+dz*dz >= p.R_base*p.R_base) par->Tag=10;
+    }
+
+    Array<int> tags;
+    tags.Push(10);
+    d.DelParticles(tags);
+}
+
+static void RemoveParticlesBelowPackingBase(DEM::Domain &d, double R)
+{
+    for (size_t i=0; i<d.Particles.Size(); ++i)
+    {
+        if (d.Particles[i]->Tag==-1 && d.Particles[i]->x(2)<=-8.0*R)
+            d.Particles[i]->Tag=11;
+    }
+
+    Array<int> tags;
+    tags.Push(11);
+    d.DelParticles(tags);
+}
+
+static void RunPacking(const InputData &p, size_t Nproc, size_t cl)
+{
+    UserData dat;
+    InitUserData(dat,p,p.height);
+
+    DEM::Domain d(&dat,cl);
+    d.UserData=&dat;
+
+    BuildPackingGeometry(d,p);
+    ConfigureParticles(d,p);
+    d.Alpha=p.R;
+    ConfigureHighOutput(d,p.hfPacking,"Packing");
+
+    cout << "Number of Particles " << d.Particles.Size() << endl;
+    d.Solve(p.Tf1,p.dt,p.dtOut1,SetupInjection,NULL,"packing",2,Nproc);
+
+    RemoveParticlesBelowPackingBase(d,p.R);
+    d.Save("packing");
+}
+
+static void RunAvalanche(const InputData &p, size_t Nproc, size_t cl)
+{
+    UserData dat;
+    InitUserData(dat,p,p.height2);
+
+    DEM::Domain d(&dat,cl);
+    d.UserData=&dat;
+    d.Load("packing");
+
+    FixContainerPlanes(d);
+    ConfigureParticles(d,p);
+
+    cout << "CACU "  << d.CriticalDt()      << endl;
+    cout << "Nproc " << Nproc               << endl;
+    cout << "Omp "   << omp_get_max_threads()<< endl;
+
+    d.Alpha=p.R/2.0;
+    ConfigureHighOutput(d,p.hfAvalanche,"Avalanche");
+    d.Solve(p.Tf2,p.dt,p.dtOut2,SetupInjection,NULL,"sandpile",2,Nproc);
+    d.Save("Stage_final");
 }
 
 int main(int argc, char **argv) try
 {
-    // set the simulation domain ////////////////////////////////////////////////////////////////////////////
+    if (argc<2)
+        throw new Fatal("This program must be called with one argument: the input file key without '.inp'.\nExample:\t%s filekey\n",argv[0]);
 
-    if (argc<2) throw new Fatal("This program must be called with one argument: the name of the data input file without the '.inp' suffix.\nExample:\t %s filekey\n",argv[0]);
-    //number of threads
-    size_t Nproc = 1; 
-    if (argc>=3) Nproc=atoi(argv[2]);
-    String filekey  (argv[1]);
-    String filename (filekey+".inp");
-    if (!Util::FileExists(filename)) throw new Fatal("File <%s> not found",filename.CStr());
-    ifstream infile(filename.CStr());
-    
-    String ptype;
-    bool   Render = true;
-    double L_x       ;
-    double L_y       ;
-    double L_z       ;
-    double nu        ;
-    double dx        ;
-    double dt        ;
-    double Dp        ;
-    double R         ;   
-    double Tf2       ;
-    double dtOut2    ;
-    double height    ;
-    double rho_s     ;
-    double w_th      ;
-    double Muw       ;
-    double Beta      ;        //
-	double Kn        ;         // Normal stiffness
-	double Kt        ;         // Tangential stiffness
-	double Gn        ;         // Normal dissipative coefficient
-    double Gnb       ;         // Normal dissipative coefficient
-	double ratiots   ;     // Coefficient to modify the time step
-	double ratiokn   ;
-    double Rp_base   ;
-    double Gnw       ;
-    double sizedis   ;
-    double MUP       ;
-    double Ang       ;
-    double fraction  ;
-    double R_source  ;
-    int    Nump      ;
-    double tp        ;
-    int    Anumper   ;
-    String contactlaw;
+    const size_t Nproc = argc>=3 ? static_cast<size_t>(atoi(argv[2])) : 1;
+    const String filekey(argv[1]);
+    const InputData p = ReadInput(filekey+".inp");
+    const size_t cl = ContactLaw(p.contactlaw);
 
+    cout << "tp "              << p.tp              << endl;
+    cout << "Rp_base "         << p.Rp_base         << endl;
+    cout << "L_z "             << p.L_z             << endl;
+    cout << "stage_packing "   << p.stage_packing   << endl;
+    cout << "stage_avalanche " << p.stage_avalanche << endl;
+    cout << "contactlaw "      << p.contactlaw      << endl;
 
-    
-    {
-        infile >> ptype;           infile.ignore(200,'\n');
-        infile >> Render;          infile.ignore(200,'\n');
-        infile >> L_x;             infile.ignore(200,'\n');
-        infile >> L_y;             infile.ignore(200,'\n');
-        infile >> L_z;             infile.ignore(200,'\n');
-        infile >> nu;              infile.ignore(200,'\n');
-        infile >> dx;              infile.ignore(200,'\n');
-        infile >> dt;              infile.ignore(200,'\n');
-        infile >> Dp;              infile.ignore(200,'\n');
-        infile >> R;               infile.ignore(200,'\n');
-        infile >> Tf2;             infile.ignore(200,'\n');
-        infile >> dtOut2;          infile.ignore(200,'\n');
-        infile >> height;          infile.ignore(200,'\n');
-        infile >> rho_s;           infile.ignore(200,'\n');
-        infile >> w_th;             infile.ignore(200,'\n');
-        infile >> Muw;             infile.ignore(200,'\n');
-        infile >> Beta;            infile.ignore(200,'\n');
-        infile >> Kn;              infile.ignore(200,'\n');
-        infile >> Gn;              infile.ignore(200,'\n');
-        infile >> Gnb;             infile.ignore(200,'\n');
-        infile >> ratiots;         infile.ignore(200,'\n');
-        infile >> ratiokn;         infile.ignore(200,'\n');
-        infile >> Rp_base;         infile.ignore(200,'\n');
-        infile >> Gnw;             infile.ignore(200,'\n');
-        infile >> sizedis;         infile.ignore(200,'\n');
-        infile >> MUP;             infile.ignore(200,'\n');
-        infile >> Ang;             infile.ignore(200,'\n');
-        infile >> fraction;        infile.ignore(200,'\n');
-        infile >> R_source;        infile.ignore(200,'\n');
-        infile >> Nump;            infile.ignore(200,'\n');
-        infile >> tp;              infile.ignore(200,'\n');
-        infile >> Anumper;         infile.ignore(200,'\n');
-        infile >> contactlaw;   infile.ignore(200,'\n');
-
-        
-
-    }
-
-    Kt=ratiokn*Kn;
-  
-
-    double acc=Dp ;
-    double ang=Ang*M_PI/180.0;
-    cout <<"tp"<< tp<<endl;
-    cout <<"Rp_base"<< Rp_base<<endl;
-    cout <<"L_z"<< L_z<<endl;
-    double Sphere_size;
-    double dtdem;
-    Vec3_t Xmin0;
-    Vec3_t Xmax0;
-    Vec3_t Center;
-    double R_base=9.2;
-    Array<int> delpar0;
-    Vec3_t axis0(OrthoSys::e0); // rotation of face
-    Vec3_t axis1(OrthoSys::e1); // rotation of face
-    double thichness=0.1;
-    
-
-    size_t cl = 0;
-    if (contactlaw=="hertz") cl=1;
-    cout <<"contactlaw"<< contactlaw <<endl;
-    UserData dat;
-    DEM::Domain d2(&dat,cl);
-
-
-    d2.UserData = &dat;
-    dat.R=R;
-    dat.rho_s=rho_s;
-    dat.acc=acc;
-    dat.height=height;
-    dat.tp=tp;
-    dat.MUP=MUP;
-    dat.Kn=Kn;
-    dat.Kt=Kt;
-    dat.Gn=Gn;
-    dat.Nump=Nump;
-    dat.Anumper=Anumper;
-    dat.R_source=R_source;
-    dat.w_th=w_th;
-    dat.ptype=ptype;
-    Center = Vec3_t(0.0,0.0,0.0);
-
-    Vec3_t Xmin0base=Vec3_t(Center(0)-1.2*R_base, Center(1)-1.2*R_base    , 0.0);
-    Vec3_t Xmax0base=Vec3_t(Center(0)+1.2*R_base, Center(1)+1.2*R_base    , Rp_base*2.0);
- 
-    if (ptype=="sphere") d2.AddSphere(-1,Vec3_t(0.0,0.0,height-16.0*R),R,rho_s);
-    if (ptype=="cube") d2.AddCube (-1, Vec3_t(0.0,0.0,height-16.0*R),w_th,0.5*R,rho_s);
-    if (ptype=="tetra") d2.AddTetra (-1, Vec3_t(0.0,0.0,height-16.0*R),w_th,0.5*R,rho_s);
-    if (ptype=="rice") d2.AddRice   (-1, Vec3_t(0.0,0.0,height-16.0*R), w_th, R*2.0, rho_s, M_PI/2.0, &axis0);
-    double scaleL=2.0;
-    d2.GenSpheresBox (-15, Xmin0base, Xmax0base, Rp_base, rho_s, "HCP",  1234, 1.0, sizedis);
-    cout <<"Number of Particles"<< d2.Particles.Size()<<endl;
-    d2.AddPlane (-16, Vec3_t(Center(0),Center(1),Center(2)-L_z), R, scaleL*R_base*2.0, scaleL*R_base*2.0, 1.0, 0.0, &axis1);
-    d2.AddPlane (-17, Vec3_t(Center(0)-R_base*scaleL,Center(1),Center(2)), R, 2.0*L_z+height, scaleL*R_base*2.0, 1.0, ang, &axis1);
-    d2.AddPlane (-18, Vec3_t(Center(0)+R_base*scaleL,Center(1),Center(2)), R, 2.0*L_z+height, scaleL*R_base*2.0, 1.0, ang, &axis1);
-    d2.AddPlane (-19, Vec3_t(Center(0),Center(1)-R_base*scaleL,Center(2)), R, scaleL*R_base*2.0, 2.0*L_z+height, 1.0, M_PI/2.0, &axis0);
-    d2.AddPlane (-20, Vec3_t(Center(0),Center(1)+R_base*scaleL,Center(2)), R, scaleL*R_base*2.0, 2.0*L_z+height, 1.0, M_PI/2.0, &axis0);
-    d2.GetParticle(-16)->FixVeloc(); 
-    d2.GetParticle(-17)->FixVeloc(); 
-    d2.GetParticle(-18)->FixVeloc(); 
-    d2.GetParticle(-19)->FixVeloc(); 
-    d2.GetParticle(-20)->FixVeloc(); 
-    size_t countdel = 0;
-
-    for (size_t np=0;np<d2.Particles.Size();np++)
-    {
-
-        if (d2.Particles[np]->Tag == -15&& pow((d2.Particles[np]->x(0)-Center(0)),2)+pow((d2.Particles[np]->x(1)-Center(1)),2)+pow((d2.Particles[np]->x(2)-Center(2)),2)>=R_base*R_base)
-        {
-            countdel = countdel+1;
-            d2.Particles[np]->Tag = 10;
-        }
-
-    }
-
-    Array<int> delpar1;
-    delpar1.Push(10);
-    d2.DelParticles(delpar1);
-
-
-    for (size_t np=0;np<d2.Particles.Size();np++)
-    {
-        if (d2.Particles[np]->Tag == -1)
-        {
-        
-            d2.Particles[np]->Ff = d2.Particles[np]->Props.m*Vec3_t(0.0,0.0,acc);
-            d2.Particles[np]->Props.Kn = Kn; // normal stiffness
-            d2.Particles[np]->Props.Kt = Kt; // trangential stiffness
-            d2.Particles[np]->Props.Gn = Gn; // restitution coefficient
-            d2.Particles[np]->Props.Mu = MUP; // frictional coefficient
-        }
-
-        if (d2.Particles[np]->Tag == -15)
-        {
-            d2.Particles[np]->v==Vec3_t(0.0,0.0,0.0);
-            d2.Particles[np]->FixVeloc();
-            d2.Particles[np]->Props.Kn = Kn; // normal stiffness
-            d2.Particles[np]->Props.Kt = Kt; // trangential stiffness
-            d2.Particles[np]->Props.Gn = Gnb; // restitution coefficient
-            d2.Particles[np]->Props.Mu = Muw; // frictional coefficient
-        }
-        if (d2.Particles[np]->Tag < -15)
-        {
-            d2.Particles[np]->v==Vec3_t(0.0,0.0,0.0);
-      
-            d2.Particles[np]->Props.Kn = Kn; // normal stiffness
-            d2.Particles[np]->Props.Kt = Kt; // trangential stiffness
-            d2.Particles[np]->Props.Gn = Gnw; // restitution coefficient
-            d2.Particles[np]->Props.Mu = Muw; // frictional coefficient
-        }
-    }
-
-    dtdem = ratiots*d2.CriticalDt(); //Calculating time step
-    cout <<"Gnb"<< Gnb<<endl;
-    cout <<"dtdem"<< dtdem<<endl;
-    cout <<"ratiots"<< ratiots<<endl;
-    cout <<"CACU"<< d2.CriticalDt()<<endl;
-    cout <<"Nproc"<< Nproc<<endl;
-    cout <<"Omp"<< omp_get_max_threads()<<endl;
-
-    d2.Alpha = R/2.0; //Verlet distance
-    d2.Solve(/*tf*/Tf2, dtdem, /*dtOut*/dtOut2, Setup, Report, "sandpile", 2, Nproc);
-    d2.Save("Stage_cpu");
-
+    if (p.stage_packing)   RunPacking(p,Nproc,cl);
+    if (p.stage_avalanche) RunAvalanche(p,Nproc,cl);
 }
 MECHSYS_CATCH

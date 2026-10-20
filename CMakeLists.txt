@@ -1,48 +1,49 @@
+
 ########################################################################
-# MechSys - Open Library for Mechanical Systems                        #
-# Copyright (C) 2010 Sergio Galindo                                    #
-#                                                                      #
-# This program is free software: you can redistribute it and/or modify #
-# it under the terms of the GNU General Public License as published by #
-# the Free Software Foundation, either version 3 of the License, or    #
-# any later version.                                                   #
-#                                                                      #
-# This program is distributed in the hope that it will be useful,      #
-# but WITHOUT ANY WARRANTY; without even the implied warranty of       #
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the         #
-# GNU General Public License for more details.                         #
-#                                                                      #
-# You should have received a copy of the GNU General Public License    #
-# along with this program. If not, see <http://www.gnu.org/licenses/>  #
+# MechSys - Open Library for Mechanical Systems
+# Copyright (C) 2010 Sergio Galindo
 ########################################################################
+
 cmake_minimum_required(VERSION 3.25)
 project(myproject)
+
 INCLUDE(UseMECHSYS.cmake)
 
+# CUDA architectures supported by Westlake University HPC:
+# A100 = 80, A40 = 86, L40S = 89
+# Override with -DMECHSYS_CUDA_ARCHITECTURES="80;86;89"
+SET(MECHSYS_CUDA_ARCHITECTURES "80;86;89" CACHE STRING
+    "CUDA architectures for WL HPC")
+
 SET(PROGS
-    #tlbmdem01
-    #tlbmdem02
-    sandpile
-   )
+    # tlbmdem01
+    # tlbmdem02
+)
 
 SET(CUDAPROGS
-    #tlbmdem_cu_01
-    #SGCBORUNGPU
-    #Sheargpu
-    #shake
-     
+    # tlbmdem_cu_01
+    # SGCBORUNGPU
+    # Sheargpu
+    suspensioncu
 )
 
 FOREACH(var ${PROGS})
-    ADD_EXECUTABLE        (${var} "${var}.cpp")
-    TARGET_LINK_LIBRARIES (${var} ${LIBS})
-    SET_TARGET_PROPERTIES (${var} PROPERTIES COMPILE_FLAGS "${FLAGS}" LINK_FLAGS "${LFLAGS}")
-ENDFOREACH(var)
+    ADD_EXECUTABLE(${var} "${var}.cpp")
+    TARGET_LINK_LIBRARIES(${var} ${LIBS})
+
+    SET_TARGET_PROPERTIES(${var} PROPERTIES
+        COMPILE_FLAGS "${FLAGS}"
+        LINK_FLAGS "${LFLAGS}"
+    )
+ENDFOREACH()
 
 FOREACH(var ${CUDAPROGS})
-    ADD_EXECUTABLE        (${var} "${var}.cu")
-    TARGET_LINK_LIBRARIES (${var} ${CUDA_LIBRARIES})
-    SET_TARGET_PROPERTIES (${var} PROPERTIES COMPILE_FLAGS "${FLAGS} -DUSE_CUDA" LINK_FLAGS "${LFLAGS}")
-    #SET_TARGET_PROPERTIES (${var} PROPERTIES COMPILE_FLAGS "${FLAGS} -DUSE_CUDA -arch=sm_60" LINK_FLAGS "${LFLAGS}")
-    SET_TARGET_PROPERTIES (${var} PROPERTIES CUDA_ARCHITECTURES "native")
-ENDFOREACH(var)
+    ADD_EXECUTABLE(${var} "${var}.cu")
+    TARGET_LINK_LIBRARIES(${var} ${CUDA_LIBRARIES})
+
+    SET_TARGET_PROPERTIES(${var} PROPERTIES
+        COMPILE_FLAGS "${FLAGS} -DUSE_CUDA"
+        LINK_FLAGS "${LFLAGS}"
+        CUDA_ARCHITECTURES "${MECHSYS_CUDA_ARCHITECTURES}"
+    )
+ENDFOREACH()
