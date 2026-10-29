@@ -268,7 +268,7 @@ static void ConfigureParticles(DEM::Domain &d, const InputData &p)
 
 static void FixContainerPlanes(DEM::Domain &d)
 {
-    for (int tag=-16; tag>=-20; --tag) d.GetParticle(tag)->FixVeloc();
+    for (int tag=-16; tag>=-25; --tag) d.GetParticle(tag)->FixVeloc();
 }
 
 static void ConfigureHighOutput(DEM::Domain &d, const HighOutputConfig &hf,
@@ -333,10 +333,9 @@ static size_t ContactLaw(const String &name)
     return name=="hertz" ? 1 : 0;
 }
 
-static void AddInitialParticle(DEM::Domain &d, const InputData &p,
-                               double height, Vec3_t &axis0)
+static void AddInitialParticle(DEM::Domain &d, const InputData &p, Vec3_t &axis0)
 {
-    const Vec3_t pos(0.0,0.0,height-16.0*p.R);
+    const Vec3_t pos(0.0,0.0,p.height-16.0*p.R);
     if      (p.ptype=="sphere") d.AddSphere(-1,pos,p.R,p.rho_s);
     else if (p.ptype=="cube")   d.AddCube  (-1,pos,p.w_th,p.scaleR*p.R,p.rho_s);
     else if (p.ptype=="tetra")  d.AddTetra (-1,pos,p.w_th,p.scaleR*p.R,p.rho_s);
@@ -344,34 +343,117 @@ static void AddInitialParticle(DEM::Domain &d, const InputData &p,
     else throw new Fatal("Unknown particle type <%s>",p.ptype.CStr());
 }
 
+
 static void BuildPackingGeometry(DEM::Domain &d, const InputData &p)
 {
-    const Vec3_t center(0.0,0.0,0.0);
+    const Vec3_t center(0.0, 0.0, 0.0);
     Vec3_t axis0(OrthoSys::e0);
     Vec3_t axis1(OrthoSys::e1);
 
-    AddInitialParticle(d,p,p.height,axis0);
+    // 保留原有初始颗粒
+    AddInitialParticle(d, p, axis0);
+    const Vec3_t xmin(center(0) - 1.2 * p.R_base,center(1) - 1.2 * p.R_base,center(2));
+    const Vec3_t xmax(center(0) + 1.2 * p.R_base,center(1) + 1.2 * p.R_base,center(2) + 2.0 * p.Rp_base);
+    d.GenSpheresBox(-15, xmin, xmax,p.Rp_base, p.rho_s,"HCP", 1234, 1.0, p.sizedis);
 
-    const Vec3_t xmin(center(0)-1.2*p.R_base,center(1)-1.2*p.R_base,center(2));
-    const Vec3_t xmax(center(0)+1.2*p.R_base,center(1)+1.2*p.R_base,center(2)+2.0*p.Rp_base);
-    d.GenSpheresBox(-15,xmin,xmax,p.Rp_base,p.rho_s,"HCP",1234,1.0,p.sizedis);
+    // --------------------------------------------------
+    // 1. 几何参数
+    // --------------------------------------------------
+
+    if (p.R_base <= 0.0 || p.L_z <= 0.0 ||
+        p.R <= 0.0 || p.Rp_base <= 0.0)
+    {
+        throw new Fatal(
+            "BuildPackingGeometry: invalid geometry parameters");
+    }
+
+    // 当前方案要求上部侧壁为竖直墙。
+    // 输入文件中的 Ang 应设置为 90 度。
+    if (std::abs(p.Ang - 90.0) > 1.0e-8)
+    {
+        throw new Fatal(
+            "BuildPackingGeometry: Ang must be 90 degrees "
+            "for the vertical-wall funnel geometry");
+    }
 
     const double scaleL = 2.0;
-    const double angle  = p.Ang*M_PI/180.0;
-    d.AddPlane(-16,Vec3_t(0.0,0.0,-p.L_z),p.w_th,scaleL*p.R_base*2.0,scaleL*p.R_base*2.0,1.0,0.0,&axis1);
-    d.AddPlane(-17,Vec3_t(-p.R_base*scaleL,0.0,0.0),p.w_th,2.0*p.L_z+p.height,scaleL*p.R_base*2.0,1.0,angle,&axis1);
-    d.AddPlane(-18,Vec3_t( p.R_base*scaleL,0.0,0.0),p.w_th,2.0*p.L_z+p.height,scaleL*p.R_base*2.0,1.0,angle,&axis1);
-    d.AddPlane(-19,Vec3_t(0.0,-p.R_base*scaleL,0.0),p.w_th,scaleL*p.R_base*2.0,2.0*p.L_z+p.height,1.0,M_PI/2.0,&axis0);
-    d.AddPlane(-20,Vec3_t(0.0, p.R_base*scaleL,0.0),p.w_th,scaleL*p.R_base*2.0,2.0*p.L_z+p.height,1.0,M_PI/2.0,&axis0);
+    // 漏斗上口半宽
+    const double topHalfWidth = scaleL * p.R_base;
+    // 用于估计颗粒特征尺寸
+    const double particleExtent =std::max(std::max(p.R, p.Rp_base),std::max(p.scaleR * p.R, p.w_th));
+    // 漏斗出口半宽。
+    // 当前默认至少为 R_base 的一半，并保留足够的颗粒通行空间。
+    const double bottomHalfWidth =std::max(0.5 * p.R_base, 4.0 * particleExtent);
+
+    if (bottomHalfWidth >= topHalfWidth)
+    {
+        throw new Fatal(
+            "BuildPackingGeometry: funnel outlet must be "
+            "narrower than the upper opening");
+    }
+    const double boxWidth = 2.0 * topHalfWidth;
+    const double outletWidth = 2.0 * bottomHalfWidth;
+    // 漏斗沿水平方向的收敛距离
+    const double funnelDelta =topHalfWidth - bottomHalfWidth;
+    // 斜板相对竖直方向的倾角
+    const double funnelAngle =std::atan2(funnelDelta, p.L_z);
+    // 斜板的实际长度
+    const double funnelLength =std::sqrt(p.L_z * p.L_z +funnelDelta * funnelDelta);
+    // 斜板中心位置
+    const double funnelMid =0.5 * (topHalfWidth + bottomHalfWidth);
+    const double funnelMidZ = -0.5 * p.L_z;
+    // 顶盖高于两个阶段的投料位置。
+    const double injectionTop =std::max(p.height, p.height2);
+    const double topZ =injectionTop + 4.0 * particleExtent + p.w_th;
+    // --------------------------------------------------
+    // 2. 漏斗底板
+    // --------------------------------------------------
+    d.AddPlane(-16,Vec3_t(0.0, 0.0, -p.L_z),p.w_th,outletWidth + 2.0 * p.w_th,outletWidth + 2.0 * p.w_th,1.0, 0.0, &axis1);
+    // --------------------------------------------------
+    // 3. 上部四面竖直墙
+    //    从 z = 0 延伸至 z = topZ
+    // --------------------------------------------------
+    // x 方向两面墙
+    d.AddPlane(-17,Vec3_t(-topHalfWidth, 0.0, 0.5 * topZ),p.w_th,topZ, boxWidth,1.0, M_PI / 2.0, &axis1);
+    d.AddPlane(-18,Vec3_t(topHalfWidth, 0.0, 0.5 * topZ),p.w_th,topZ, boxWidth,1.0, M_PI / 2.0, &axis1);
+    // y 方向两面墙
+    d.AddPlane(-19,Vec3_t(0.0, -topHalfWidth, 0.5 * topZ),p.w_th,boxWidth, topZ,1.0, M_PI / 2.0, &axis0);
+    d.AddPlane(-20,Vec3_t(0.0, topHalfWidth, 0.5 * topZ),p.w_th,boxWidth, topZ,1.0, M_PI / 2.0, &axis0);
+    // --------------------------------------------------
+    // 4. 顶部封闭盖板
+    // --------------------------------------------------
+    d.AddPlane(-21,Vec3_t(0.0, 0.0, topZ),p.w_th,boxWidth + 2.0 * p.w_th,boxWidth + 2.0 * p.w_th,1.0, 0.0, &axis1);
+    // --------------------------------------------------
+    // 5. 漏斗四面斜板
+    // 上端：z = 0，半宽 topHalfWidth
+    // 下端：z = -L_z，半宽 bottomHalfWidth
+    // --------------------------------------------------
+    // x 负方向斜板
+    d.AddPlane(-22,Vec3_t(-funnelMid, 0.0, funnelMidZ),p.w_th,funnelLength, boxWidth,1.0, -M_PI / 2.0 - funnelAngle, &axis1);
+    // x 正方向斜板
+    d.AddPlane(-23,Vec3_t(funnelMid, 0.0, funnelMidZ),p.w_th,funnelLength, boxWidth,1.0, M_PI / 2.0 + funnelAngle, &axis1);
+    // y 负方向斜板
+    d.AddPlane(-24,Vec3_t(0.0, -funnelMid, funnelMidZ),p.w_th,boxWidth, funnelLength,1.0, M_PI / 2.0 + funnelAngle, &axis0);
+    // y 正方向斜板
+    d.AddPlane(-25,Vec3_t(0.0, funnelMid, funnelMidZ),p.w_th,boxWidth, funnelLength,1.0, -M_PI / 2.0 - funnelAngle, &axis0);
+    // 固定全部边界
     FixContainerPlanes(d);
 
-    for (size_t i=0; i<d.Particles.Size(); ++i)
+    for (size_t i = 0; i < d.Particles.Size(); ++i)
     {
         DEM::Particle *par = d.Particles[i];
-        if (par->Tag!=-15) continue;
 
-        const double dx=par->x(0), dy=par->x(1), dz=par->x(2);
-        if (dx*dx+dy*dy+dz*dz >= p.R_base*p.R_base) par->Tag=10;
+        if (par->Tag != -15) continue;
+
+        const double dx = par->x(0);
+        const double dy = par->x(1);
+        const double dz = par->x(2);
+
+        if (dx * dx + dy * dy + dz * dz >=
+            p.R_base * p.R_base)
+        {
+            par->Tag = 10;
+        }
     }
 
     Array<int> tags;
@@ -379,11 +461,12 @@ static void BuildPackingGeometry(DEM::Domain &d, const InputData &p)
     d.DelParticles(tags);
 }
 
-static void RemoveParticlesBelowPackingBase(DEM::Domain &d, double R)
+
+static void RemoveParticlesBelowPackingBase(DEM::Domain &d, double R, double height)
 {
     for (size_t i=0; i<d.Particles.Size(); ++i)
     {
-        if (d.Particles[i]->Tag==-1 && d.Particles[i]->x(2)<=-8.0*R)
+        if (d.Particles[i]->Tag==-1 && d.Particles[i]->x(2)<=-8.0*R&& d.Particles[i]->x(2)>=height-2.0*R)
             d.Particles[i]->Tag=11;
     }
 
@@ -408,7 +491,7 @@ static void RunPacking(const InputData &p, size_t Nproc, size_t cl)
     cout << "Number of Particles " << d.Particles.Size() << endl;
     d.Solve(p.Tf1,p.dt,p.dtOut1,SetupInjection,NULL,"packing",2,Nproc);
 
-    RemoveParticlesBelowPackingBase(d,p.R);
+    RemoveParticlesBelowPackingBase(d,p.R, p.height);
     d.Save("packing");
 }
 
