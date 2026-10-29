@@ -325,7 +325,19 @@ static void SetupInjection(DEM::Domain &d, void *UD)
         ++dat.ADDS;
     }
 
-    if (!circles.empty()) d.UpdateContacts();
+    if (!circles.empty())
+    {
+#ifndef USE_CUDA
+        // Solve allocated these per-thread buffers before dynamic injection.
+        // Resize before its next force pass, which visits every particle.
+        for (size_t i=0; i<d.Nproc; ++i)
+        {
+            d.MTD[i].F.Resize(d.Particles.Size());
+            d.MTD[i].T.Resize(d.Particles.Size());
+        }
+#endif
+        d.UpdateContacts();
+    }
 }
 
 static size_t ContactLaw(const String &name)
@@ -489,6 +501,7 @@ static void RunPacking(const InputData &p, size_t Nproc, size_t cl)
     ConfigureHighOutput(d,p.hfPacking,"Packing");
 
     cout << "Number of Particles " << d.Particles.Size() << endl;
+    cout << "hfAvalanchedt " << p.hfAvalanche.dt << endl;
     d.Solve(p.Tf1,p.dt,p.dtOut1,SetupInjection,NULL,"packing",2,Nproc);
 
     RemoveParticlesBelowPackingBase(d,p.R, p.height);
@@ -513,7 +526,7 @@ static void RunAvalanche(const InputData &p, size_t Nproc, size_t cl)
 
     d.Alpha=p.R/2.0;
     ConfigureHighOutput(d,p.hfAvalanche,"Avalanche");
-    d.Solve(p.Tf2,p.dt,p.dtOut2,SetupInjection,NULL,"sandpile",2,Nproc);
+    d.Solve(d.Time+p.Tf2,p.dt,p.dtOut2,SetupInjection,NULL,"sandpile",2,Nproc);
     d.Save("Stage_final");
 }
 
